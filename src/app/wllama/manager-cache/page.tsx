@@ -162,7 +162,7 @@ export default function CacheManager() {
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <div className="bg-white border-b border-gray-200 p-4">
-        <div className="max-w-7xl mx-auto">
+        <div className="w-full mx-auto">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-xl font-semibold">模型缓存管理</h1>
             <Space>
@@ -234,8 +234,8 @@ export default function CacheManager() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden p-4">
-        <div className="max-w-7xl">
+      <div className="flex-1 overflow-scroll p-4">
+        <div className="w-full">
           {cacheEntries.length === 0 ? (
             <div className="text-center text-gray-400 mt-20">
               <p>暂无缓存文件</p>
