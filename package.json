@@ -1,0 +1,30 @@
+{
+  "name": "mvp-ai-wllama",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3098",
+    "build": "next build",
+    "start": "next dev"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.1.0",
+    "@huggingface/jinja": "^0.5.3",
+    "@wllama/wllama": "^2.3.7",
+    "ahooks": "^3.9.5",
+    "antd": "^5.27.6",
+    "lodash-es": "^4.17.21",
+    "next": "15.5.7",
+    "postcss": "^8.5.6",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
