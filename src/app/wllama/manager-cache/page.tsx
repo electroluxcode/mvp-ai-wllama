@@ -235,7 +235,7 @@ export default function CacheManager() {
       </div>
 
       <div className="flex-1 overflow-hidden p-4">
-        <div className="max-w-7xl overflow-x-scroll">
+        <div className="max-w-7xl">
           {cacheEntries.length === 0 ? (
             <div className="text-center text-gray-400 mt-20">
               <p>暂无缓存文件</p>
