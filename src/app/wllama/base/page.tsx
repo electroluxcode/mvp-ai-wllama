@@ -133,7 +133,7 @@ export default function MinimalExample() {
           )}
           <div className="flex gap-2">
             <textarea
-              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded resize-none focus:outline-none focus:border-blue-500 disabled:bg-gray-50"
+              className="flex-1 px-3 text-sm border border-gray-200 rounded resize-none focus:outline-none focus:border-blue-500 disabled:bg-gray-50"
               placeholder={isModelLoaded ? '输入消息...' : '请先加载模型'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -147,7 +147,7 @@ export default function MinimalExample() {
               rows={2}
             />
             <button
-              className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              className="px-4 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
               onClick={send}
               disabled={!isModelLoaded || generating || !input.trim()}
             >

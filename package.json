@@ -10,7 +10,7 @@
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
     "@huggingface/jinja": "^0.5.3",
-    "@wllama/wllama": "^2.3.7",
+    "@wllama/wllama": "2.3.7",
     "ahooks": "^3.9.5",
     "antd": "^5.27.6",
     "lodash-es": "^4.17.21",
