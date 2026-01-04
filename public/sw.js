@@ -21,23 +21,26 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     (async () => {
-      // 优先检查缓存
-      let cached = await caches.match(request);
+      const cache = await caches.open(CACHE_NAME);
+      const pathname = url.pathname;
       
-      // 导航请求：尝试匹配路径（忽略查询参数）
-      if (!cached && request.mode === 'navigate') {
+      // 优先检查缓存：精确匹配
+      let cached = await cache.match(request);
+      
+      // 如果没有精确匹配，尝试多种匹配方式
+      if (!cached) {
+        // 1. 匹配路径（忽略查询参数和 hash）
         const urlNoQuery = new URL(request.url);
         urlNoQuery.search = '';
-        cached = await caches.match(urlNoQuery);
+        urlNoQuery.hash = '';
+        cached = await cache.match(urlNoQuery);
         
-        // 如果还没有，查找匹配路径的缓存
+        // 2. 查找匹配路径的所有缓存
         if (!cached) {
-          const cache = await caches.open(CACHE_NAME);
           const keys = await cache.keys();
-          const pathname = url.pathname;
-          
           for (const key of keys) {
-            if (new URL(key.url).pathname === pathname) {
+            const keyUrl = new URL(key.url);
+            if (keyUrl.pathname === pathname) {
               cached = await cache.match(key);
               if (cached) break;
             }
@@ -45,36 +48,54 @@ self.addEventListener('fetch', (event) => {
         }
       }
 
-      // 有缓存：返回缓存，后台更新
+      // 有缓存：立即返回，避免显示错误页面
       if (cached) {
-        fetch(request).then((res) => {
-          if (res?.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, res.clone()));
-          }
-        }).catch(() => {});
+        // 后台更新缓存（不阻塞响应）
+        event.waitUntil(
+          fetch(request).then((res) => {
+            if (res?.status === 200) {
+              return cache.put(request, res.clone());
+            }
+          }).catch(() => {})
+        );
         return cached;
       }
 
-      // 无缓存：网络请求
+      // 无缓存：网络请求（带超时，快速失败）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2秒超时，快速失败
+      
       try {
-        const res = await fetch(request);
+        const res = await fetch(request, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
         if (res?.status === 200) {
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, res.clone()));
+          event.waitUntil(cache.put(request, res.clone()));
         }
         return res;
       } catch {
-        // 导航请求失败：尝试返回首页
+        clearTimeout(timeoutId);
+        // 导航请求失败：再次检查缓存（可能缓存刚更新）
         if (request.mode === 'navigate') {
-          return (await caches.match('/')) || (await caches.open(CACHE_NAME).then(async (cache) => {
-            for (const key of await cache.keys()) {
-              const keyUrl = new URL(key.url);
-              if (key.mode === 'navigate' || keyUrl.pathname.endsWith('/')) {
-                return await cache.match(key);
-              }
+          // 再次尝试匹配路径
+          const urlNoQuery = new URL(request.url);
+          urlNoQuery.search = '';
+          urlNoQuery.hash = '';
+          const fallback = await cache.match(urlNoQuery) || await cache.match('/');
+          if (fallback) return fallback;
+          
+          // 查找任何已缓存的页面
+          const keys = await cache.keys();
+          for (const key of keys) {
+            const keyUrl = new URL(key.url);
+            if (key.mode === 'navigate' || keyUrl.pathname.endsWith('/')) {
+              const page = await cache.match(key);
+              if (page) return page;
             }
-          }));
+          }
         }
-        throw new Error('Offline');
+        // 其他请求失败：返回空响应
+        return new Response('', { status: 503 });
       }
     })()
   );
