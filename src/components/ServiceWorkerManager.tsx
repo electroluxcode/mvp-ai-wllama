@@ -16,11 +16,16 @@ const isPWA = (): boolean => {
 export default function ServiceWorkerManager({ swPath = '/sw.js' }: ServiceWorkerManagerProps) {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
   const registeringRef = useRef(false);
+  const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
+    let mounted = true;
+
     const checkAndManageSW = async () => {
+      if (!mounted) return;
+
       const existingReg = await navigator.serviceWorker.getRegistration();
       const currentIsPWA = isPWA();
 
@@ -31,21 +36,27 @@ export default function ServiceWorkerManager({ swPath = '/sw.js' }: ServiceWorke
           await existingReg.unregister();
           const cacheNames = await caches.keys();
           await Promise.all(cacheNames.map(name => caches.delete(name)));
-          setRegistration(null);
-          console.log('Service Worker 已卸载');
-          // 触发状态变化事件
-          window.dispatchEvent(new Event('sw-status-change'));
+          if (mounted) {
+            registrationRef.current = null;
+            setRegistration(null);
+            console.log('Service Worker 已卸载');
+            // 触发状态变化事件
+            window.dispatchEvent(new Event('sw-status-change'));
+          }
         } catch (error) {
           console.error('卸载 Service Worker 失败:', error);
         }
         return;
       }
 
-      // 如果已注册，更新状态
+      // 如果已注册，更新状态（只在状态变化时触发事件）
       if (existingReg) {
-        setRegistration(existingReg);
-        // 触发状态变化事件
-        window.dispatchEvent(new Event('sw-status-change'));
+        if (mounted && registrationRef.current !== existingReg) {
+          registrationRef.current = existingReg;
+          setRegistration(existingReg);
+          // 只在状态真正变化时触发事件
+          window.dispatchEvent(new Event('sw-status-change'));
+        }
         return;
       }
 
@@ -55,20 +66,23 @@ export default function ServiceWorkerManager({ swPath = '/sw.js' }: ServiceWorke
       registeringRef.current = true;
       try {
         const reg = await navigator.serviceWorker.register(swPath);
-        setRegistration(reg);
-        console.log('Service Worker 注册成功（PWA 环境）', reg);
-        
-        // 触发状态变化事件
-        window.dispatchEvent(new Event('sw-status-change'));
-        
-        reg.addEventListener('updatefound', () => {
-          const worker = reg.installing;
-          worker?.addEventListener('statechange', () => {
-            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('发现新版本，请刷新页面');
-            }
+        if (mounted) {
+          registrationRef.current = reg;
+          setRegistration(reg);
+          console.log('Service Worker 注册成功（PWA 环境）', reg);
+          
+          // 触发状态变化事件
+          window.dispatchEvent(new Event('sw-status-change'));
+          
+          reg.addEventListener('updatefound', () => {
+            const worker = reg.installing;
+            worker?.addEventListener('statechange', () => {
+              if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('发现新版本，请刷新页面');
+              }
+            });
           });
-        });
+        }
       } catch (error) {
         console.error('Service Worker 注册失败:', error);
       } finally {
@@ -76,14 +90,21 @@ export default function ServiceWorkerManager({ swPath = '/sw.js' }: ServiceWorke
       }
     };
 
+    // 只在初始化时检查一次
     checkAndManageSW();
 
-    // 监听 display-mode 变化
+    // 监听 display-mode 变化（只在真正变化时触发）
     const standaloneMedia = window.matchMedia('(display-mode: standalone)');
     const minimalUIMedia = window.matchMedia('(display-mode: minimal-ui)');
     
+    let lastIsPWA = isPWA();
     const handleMediaChange = () => {
-      checkAndManageSW();
+      const currentIsPWA = isPWA();
+      // 只在 PWA 状态真正变化时才检查
+      if (currentIsPWA !== lastIsPWA) {
+        lastIsPWA = currentIsPWA;
+        checkAndManageSW();
+      }
     };
 
     standaloneMedia.addEventListener('change', handleMediaChange);
@@ -108,10 +129,11 @@ export default function ServiceWorkerManager({ swPath = '/sw.js' }: ServiceWorke
     };
 
     return () => {
+      mounted = false;
       standaloneMedia.removeEventListener('change', handleMediaChange);
       minimalUIMedia.removeEventListener('change', handleMediaChange);
     };
-  }, [swPath, registration]);
+  }, [swPath]); // 移除 registration 依赖，避免循环
 
   return null;
 }
