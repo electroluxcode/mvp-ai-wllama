@@ -13,6 +13,9 @@ const PRECACHE_URLS = [
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
+  // WASM 文件
+  '/wasm/wllama/single-thread/wllama.wasm',
+  '/wasm/wllama/multi-thread/wllama.wasm',
 ];
 
 // 安装 Service Worker
@@ -76,9 +79,50 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // 检查是否是 WASM 文件或其他静态资源
+  const isWasmFile = url.pathname.endsWith('.wasm');
+  const isStaticAsset = /\.(wasm|woff|woff2|ttf|eot|png|jpg|jpeg|svg|gif|webp|ico|css|js)$/i.test(url.pathname);
+
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
-      // 如果有缓存，先返回缓存
+      // 对于 WASM 和静态资源，优先使用缓存（Cache First）
+      if (isWasmFile || isStaticAsset) {
+        if (cachedResponse) {
+          // 后台更新缓存（不阻塞响应）
+          fetch(request).then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(request, networkResponse.clone());
+              });
+            }
+          }).catch(() => {
+            // 网络请求失败，忽略
+          });
+          return cachedResponse;
+        }
+        
+        // 没有缓存，尝试网络请求
+        return fetch(request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseToCache);
+            });
+          }
+          return networkResponse;
+        }).catch(() => {
+          // WASM 文件离线时返回错误
+          return new Response('WASM file unavailable offline', {
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: new Headers({
+              'Content-Type': 'text/plain',
+            }),
+          });
+        });
+      }
+
+      // 对于页面请求，使用 Cache First + 后台更新策略
       if (cachedResponse) {
         // 同时尝试更新缓存
         fetch(request).then((networkResponse) => {
