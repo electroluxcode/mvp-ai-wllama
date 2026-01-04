@@ -14,7 +14,10 @@ import {
   MenuOutlined,
   CloseOutlined,
 } from '@ant-design/icons'
+
+import ServiceWorkerUninstall from '@/components/ServiceWorkerUninstall'
 import './styles.css'
+import ServiceWorkerManager from '../ServiceWorkerManager'
 
 const { Sider } = Layout
 
@@ -67,6 +70,12 @@ export default function StudioLayout({ children }: StudioLayoutProps) {
   const router = useRouter()
   const [openKeys, setOpenKeys] = useState<string[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
+
+  // 客户端挂载后设置
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   // 根据路径自动展开对应的菜单并选中菜单项
   useEffect(() => {
@@ -170,6 +179,12 @@ export default function StudioLayout({ children }: StudioLayoutProps) {
             >
               <GithubOutlined /> GitHub
             </a>
+            {isMounted && (
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                <ServiceWorkerUninstall />
+                <ServiceWorkerManager swPath="/sw.js" />
+              </div>
+            )}
           </div>
         </div>
       </Sider>
