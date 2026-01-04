@@ -8,6 +8,8 @@
 - 🔧 **类型安全** - 完整的 TypeScript 类型定义
 - 💾 **持久化存储** - 自动保存推理参数到 localStorage
 - 🎨 **简洁 API** - 易于使用的接口设计
+- 💿 **模型缓存** - 基于 OPFS 的模型文件缓存系统，支持从 URL 下载和本地文件导入
+- ⚡ **多线程支持** - 自动检测并使用多线程模式（需要正确的 HTTP 响应头配置）
 
 ## 安装
 
@@ -130,6 +132,40 @@ const files = [/* File 对象 */];
 await wllamaCore.loadModelFromFiles(files, {
   n_ctx: 4096,
   n_batch: 128,
+});
+```
+
+##### `loadModelFromUrl(url: string, options?: LoadModelOptions & { useCache?: boolean; downloadOptions?: DownloadOptions }): Promise<void>`
+
+从远程 URL 加载模型（支持自动缓存）。
+
+**参数：**
+- `url`: 模型文件的 URL
+- `options?`: 加载选项
+  - `useCache?`: 是否使用缓存（默认 `true`）
+  - `downloadOptions?`: 下载选项
+    - `progressCallback?`: 下载进度回调
+    - `headers?`: 自定义请求头
+    - `signal?`: AbortSignal 用于取消下载
+  - 其他选项同 `loadModelFromFiles`
+
+**示例：**
+```typescript
+// 从 URL 加载并自动缓存
+await wllamaCore.loadModelFromUrl('https://example.com/model.gguf', {
+  n_ctx: 4096,
+  n_batch: 128,
+  downloadOptions: {
+    progressCallback: (progress) => {
+      console.log(`下载进度: ${(progress.loaded / progress.total * 100).toFixed(1)}%`);
+    },
+  },
+});
+
+// 禁用缓存，直接下载
+await wllamaCore.loadModelFromUrl('https://example.com/model.gguf', {
+  useCache: false,
+  n_ctx: 4096,
 });
 ```
 
@@ -314,6 +350,36 @@ interface CompletionOptions {
 }
 ```
 
+### CacheEntry
+
+```typescript
+interface CacheEntry {
+  name: string;              // 缓存中的文件名
+  size: number;              // 文件大小（字节）
+  metadata: CacheEntryMetadata;
+}
+```
+
+### CacheEntryMetadata
+
+```typescript
+interface CacheEntryMetadata {
+  etag: string;              // ETag 头（用于验证）
+  originalSize: number;      // 原始文件大小
+  originalURL: string;       // 原始 URL
+}
+```
+
+### DownloadOptions
+
+```typescript
+interface DownloadOptions {
+  progressCallback?: (progress: { loaded: number; total: number }) => void;
+  headers?: Record<string, string>;  // 自定义请求头
+  signal?: AbortSignal;               // 用于取消下载
+}
+```
+
 ## 工具函数
 
 ### formatChat
@@ -354,6 +420,63 @@ DebugLogger.warn('警告信息');
 DebugLogger.error('错误信息');
 ```
 
+### CacheManager
+
+模型缓存管理器，基于 OPFS (Origin Private File System) 实现。
+
+```typescript
+import { cacheManager, CacheEntry } from './wllama-core';
+
+// 下载并缓存模型
+await cacheManager.download('https://example.com/model.gguf', {
+  progressCallback: (progress) => {
+    console.log(`进度: ${progress.loaded}/${progress.total}`);
+  },
+});
+
+// 从缓存读取文件
+const cachedFile = await cacheManager.open('https://example.com/model.gguf');
+if (cachedFile) {
+  // 使用缓存的文件
+  await wllamaCore.loadModelFromFiles([cachedFile]);
+}
+
+// 列出所有缓存文件
+const entries: CacheEntry[] = await cacheManager.list();
+entries.forEach(entry => {
+  console.log(`${entry.name}: ${entry.size} bytes`);
+});
+
+// 删除单个缓存文件
+await cacheManager.delete('https://example.com/model.gguf');
+
+// 清空所有缓存
+await cacheManager.clear();
+
+// 检查文件是否在缓存中
+const exists = await cacheManager.exists('https://example.com/model.gguf');
+
+// 保存文件到缓存
+const file = new File([blob], 'model.gguf');
+await cacheManager.write('/model.gguf', file, {
+  etag: '',
+  originalSize: file.size,
+  originalURL: '/model.gguf',
+});
+```
+
+**CacheManager 方法：**
+
+- `download(url: string, options?: DownloadOptions): Promise<void>` - 从 URL 下载并缓存
+- `open(nameOrURL: string): Promise<File | null>` - 从缓存打开文件
+- `list(): Promise<CacheEntry[]>` - 列出所有缓存文件
+- `delete(nameOrURL: string): Promise<void>` - 删除单个缓存文件
+- `clear(): Promise<void>` - 清空所有缓存
+- `exists(nameOrURL: string): Promise<boolean>` - 检查文件是否存在
+- `write(url: string, file: File | Blob, metadata?: CacheEntryMetadata): Promise<void>` - 写入文件到缓存
+- `getSize(name: string): Promise<number>` - 获取文件大小
+- `getMetadata(name: string): Promise<CacheEntryMetadata | null>` - 获取文件元数据
+
 ## 配置
 
 ### WLLAMA_CONFIG_PATHS
@@ -368,8 +491,113 @@ const wllamaCore = new WllamaCore({
 });
 ```
 
+### 启用多线程支持
+
+要启用多线程支持，需要在 Next.js 中配置 middleware 设置正确的 HTTP 响应头：
+
+```typescript
+// src/middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  const response = NextResponse.next();
+  
+  // 启用 SharedArrayBuffer 支持（多线程所需）
+  response.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  response.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  
+  return response;
+}
+
+export const config = {
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+**注意：**
+- 必须在 HTTPS 环境下运行（或 localhost）
+- 需要浏览器支持 SharedArrayBuffer
+- 设置响应头后需要重启开发服务器
+
+### 缓存系统要求
+
+缓存系统基于 OPFS (Origin Private File System)，需要：
+
+- 安全上下文（HTTPS 或 localhost）
+- 现代浏览器支持（Chrome、Firefox、Edge 等）
+
 ## 完整示例
 
+### 基本使用
+
 查看 `example.ts` 文件获取更多使用示例。
+
+### 使用缓存加载模型
+
+```typescript
+import { WllamaCore, cacheManager, WLLAMA_CONFIG_PATHS } from './wllama-core';
+
+const wllamaCore = new WllamaCore({ paths: WLLAMA_CONFIG_PATHS });
+
+// 方式 1: 从 URL 加载（自动缓存）
+await wllamaCore.loadModelFromUrl('https://example.com/model.gguf', {
+  n_ctx: 4096,
+  downloadOptions: {
+    progressCallback: (progress) => {
+      console.log(`下载: ${progress.loaded}/${progress.total}`);
+    },
+  },
+});
+
+// 方式 2: 手动下载并缓存
+await cacheManager.download('https://example.com/model.gguf');
+const cachedFile = await cacheManager.open('https://example.com/model.gguf');
+if (cachedFile) {
+  await wllamaCore.loadModelFromFiles([cachedFile], { n_ctx: 4096 });
+}
+
+// 方式 3: 从本地文件导入到缓存
+const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+const file = fileInput.files?.[0];
+if (file) {
+  await cacheManager.write(`/${file.name}`, file, {
+    etag: '',
+    originalSize: file.size,
+    originalURL: `/${file.name}`,
+  });
+  
+  // 然后从缓存加载
+  const cachedFile = await cacheManager.open(`/${file.name}`);
+  if (cachedFile) {
+    await wllamaCore.loadModelFromFiles([cachedFile], { n_ctx: 4096 });
+  }
+}
+```
+
+### 管理缓存
+
+```typescript
+import { cacheManager, toHumanReadableSize } from './wllama-core';
+
+// 列出所有缓存文件
+const entries = await cacheManager.list();
+console.log(`缓存文件数: ${entries.length}`);
+entries.forEach(entry => {
+  console.log(`${entry.metadata.originalURL || entry.name}: ${toHumanReadableSize(entry.size)}`);
+});
+
+// 获取缓存总大小
+const totalSize = entries.reduce((sum, entry) => sum + entry.size, 0);
+console.log(`总大小: ${toHumanReadableSize(totalSize)}`);
+
+// 删除特定文件
+await cacheManager.delete('https://example.com/model.gguf');
+
+// 清空所有缓存
+await cacheManager.clear();
+```
 
 

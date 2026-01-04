@@ -4,19 +4,11 @@
  * 这个文件展示了如何使用 WllamaCore 类来加载模型和生成文本
  */
 
-import { WllamaCore, Message, WllamaCoreEvent } from './index';
-import wllamaSingle from '@wllama/wllama/src/single-thread/wllama.wasm?url';
-import wllamaMulti from '@wllama/wllama/src/multi-thread/wllama.wasm?url';
+import { WllamaCore, Message, WllamaCoreEvent, WLLAMA_CONFIG_PATHS, cacheManager } from './index';
 
-// 配置路径
-const PATHS = {
-  'single-thread/wllama.wasm': wllamaSingle,
-  'multi-thread/wllama.wasm': wllamaMulti,
-};
-
-// 创建 WllamaCore 实例
+// 创建 WllamaCore 实例（使用默认配置）
 const wllamaCore = new WllamaCore({
-  paths: PATHS,
+  paths: WLLAMA_CONFIG_PATHS,
 });
 
 // 监听事件
@@ -100,5 +92,64 @@ export function setInferenceParams(params: Partial<InferenceParams>) {
 // 示例：获取推理参数
 export function getInferenceParams() {
   return wllamaCore.getInferenceParams();
+}
+
+// 示例：从 URL 加载模型（自动缓存）
+export async function loadModelFromUrl(url: string) {
+  try {
+    await wllamaCore.loadModelFromUrl(url, {
+      n_ctx: 4096,
+      n_batch: 128,
+      downloadOptions: {
+        progressCallback: (progress) => {
+          const percent = progress.total > 0 
+            ? (progress.loaded / progress.total * 100).toFixed(1) 
+            : '0';
+          console.log(`下载进度: ${percent}%`);
+        },
+      },
+    });
+    
+    const metadata = wllamaCore.getModelMetadata();
+    console.log('模型名称:', metadata?.name);
+  } catch (error) {
+    console.error('加载模型失败:', error);
+  }
+}
+
+// 示例：管理缓存
+export async function cacheExamples() {
+  // 列出所有缓存文件
+  const entries = await cacheManager.list();
+  console.log(`缓存文件数: ${entries.length}`);
+  
+  // 检查文件是否在缓存中
+  const url = 'https://example.com/model.gguf';
+  const exists = await cacheManager.exists(url);
+  console.log(`文件是否存在: ${exists}`);
+  
+  // 如果不存在，下载并缓存
+  if (!exists) {
+    await cacheManager.download(url, {
+      progressCallback: (progress) => {
+        console.log(`下载: ${progress.loaded}/${progress.total}`);
+      },
+    });
+  }
+  
+  // 从缓存加载文件
+  const cachedFile = await cacheManager.open(url);
+  if (cachedFile) {
+    await wllamaCore.loadModelFromFiles([cachedFile], {
+      n_ctx: 4096,
+      n_batch: 128,
+    });
+  }
+  
+  // 删除缓存文件
+  // await cacheManager.delete(url);
+  
+  // 清空所有缓存
+  // await cacheManager.clear();
 }
 

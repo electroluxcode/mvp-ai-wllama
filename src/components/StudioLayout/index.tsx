@@ -18,16 +18,40 @@ import './styles.css'
 
 const { Sider } = Layout
 
+// 路由常量
+const ROUTES = {
+  WLLAMA: '/wllama',
+  WLLAMA_LOAD_FROM_FILE: '/wllama/load-from-file',
+  WLLAMA_LOAD_FROM_URL: '/wllama/load-from-url',
+  WLLAMA_LOAD_FROM_CACHE: '/wllama/load-from-cache',
+  WLLAMA_CACHE: '/wllama/manager-cache',
+} as const
+
 const menuItems: MenuProps['items'] = [
   {
-    key: '/wllama',
+    key: ROUTES.WLLAMA,
     icon: <FileExcelOutlined />,
     label: 'Wllama',
     children: [
       {
-        key: '/wllama/base',
+        key: ROUTES.WLLAMA_LOAD_FROM_FILE,
         icon: <FolderOutlined />,
-        label: 'Base',
+        label: 'Load From File',
+      },
+      {
+        key: ROUTES.WLLAMA_LOAD_FROM_URL,
+        icon: <FolderOutlined />,
+        label: 'Load From URL',
+      },
+      {
+        key: ROUTES.WLLAMA_LOAD_FROM_CACHE,
+        icon: <FolderOutlined />,
+        label: 'Load From Cache',
+      },
+      {
+        key: ROUTES.WLLAMA_CACHE,
+        icon: <FolderOutlined />,
+        label: 'Manager Cache',
       },
     ],
   },
@@ -50,11 +74,10 @@ export default function StudioLayout({ children }: StudioLayoutProps) {
 
     // 所有可能的路径映射
     const routeMap: Record<string, { selected: string; parent: string }> = {
-      '/excel/base': { selected: '/excel/base', parent: '/excel' },
-      '/docs/base': { selected: '/docs/base', parent: '/docs' },
-      '/ppt/base': { selected: '/ppt/base', parent: '/ppt' },
-      '/multi/base': { selected: '/multi/base', parent: '/multi' },
-      '/multi/tabs': { selected: '/multi/tabs', parent: '/multi' },
+      [ROUTES.WLLAMA_LOAD_FROM_FILE]: { selected: ROUTES.WLLAMA_LOAD_FROM_FILE, parent: ROUTES.WLLAMA },
+      [ROUTES.WLLAMA_LOAD_FROM_URL]: { selected: ROUTES.WLLAMA_LOAD_FROM_URL, parent: ROUTES.WLLAMA },
+      [ROUTES.WLLAMA_LOAD_FROM_CACHE]: { selected: ROUTES.WLLAMA_LOAD_FROM_CACHE, parent: ROUTES.WLLAMA },
+      [ROUTES.WLLAMA_CACHE]: { selected: ROUTES.WLLAMA_CACHE, parent: ROUTES.WLLAMA },
     }
 
     // 精确匹配路径

@@ -5,7 +5,7 @@ function page() {
   const router = useRouter()
   // 跳转到 excel 页面
   useEffect(() => {
-    router.push('/wllama/base' as any)
+    router.push('/wllama/load-from-file' as any)
   }, [router])
   return (
     <div>page</div>

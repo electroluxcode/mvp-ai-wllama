@@ -1,6 +1,5 @@
 'use client'
 
-import { usePathname } from 'next/navigation';
 import StudioLayout from '@/components/StudioLayout';
 import "./globals.css";
 

@@ -12,6 +12,7 @@ import {
 } from './types';
 import { formatChat, DebugLogger } from './utils';
 import { WllamaStorage } from './storage';
+import { cacheManager, DownloadOptions } from './cache-manager';
 
 export class WllamaCore {
   private wllama: Wllama;
@@ -122,6 +123,70 @@ export class WllamaCore {
         metadata: this.modelMetadata,
         runtimeInfo: this.runtimeInfo,
       });
+    } catch (error) {
+      this.resetInstance();
+      const errorMsg = (error as Error)?.message ?? 'Unknown error';
+      this.emit(WllamaCoreEvent.ERROR, errorMsg);
+      throw new Error(errorMsg);
+    }
+  }
+
+  /**
+   * Load model from remote URL with caching support
+   */
+  async loadModelFromUrl(
+    url: string,
+    options?: LoadModelOptions & { 
+      useCache?: boolean;
+      downloadOptions?: DownloadOptions;
+    }
+  ): Promise<void> {
+    if (this.isModelLoaded || this.isGenerating) {
+      throw new Error('Another model is already loaded or generation is in progress');
+    }
+
+    if (!url) {
+      throw new Error('URL is required');
+    }
+
+    this.emit(WllamaCoreEvent.MODEL_LOADING);
+
+    const useCache = options?.useCache !== false; // Default to true
+
+    try {
+      let file: File;
+
+      // Check cache first if enabled
+      if (useCache) {
+        const cachedFile = await cacheManager.open(url);
+        if (cachedFile) {
+          this.logger?.log('Loading model from cache:', url);
+          file = cachedFile;
+        } else {
+          // Download and cache
+          this.logger?.log('Downloading and caching model:', url);
+          await cacheManager.download(url, options?.downloadOptions);
+          const downloadedFile = await cacheManager.open(url);
+          if (!downloadedFile) {
+            throw new Error('Failed to open cached file after download');
+          }
+          file = downloadedFile;
+        }
+      } else {
+        // Direct download without caching
+        const response = await fetch(url, {
+          headers: options?.downloadOptions?.headers,
+          signal: options?.downloadOptions?.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch model: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const fileName = url.split('/').pop() || 'model.gguf';
+        file = new File([blob], fileName, { type: 'application/octet-stream' });
+      }
+
+      await this.loadModelFromFiles([file], options);
     } catch (error) {
       this.resetInstance();
       const errorMsg = (error as Error)?.message ?? 'Unknown error';
