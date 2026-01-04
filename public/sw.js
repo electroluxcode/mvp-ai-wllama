@@ -86,25 +86,37 @@ self.addEventListener('fetch', (event) => {
       }).catch(() => {
         // 网络请求失败
         if (request.mode === 'navigate') {
-          // 导航请求失败，尝试返回首页
+          // 导航请求失败，尝试返回首页或任何已缓存的页面
           return caches.match(OFFLINE_PAGE).then((fallbackResponse) => {
-            return fallbackResponse || new Response('Offline', {
-              status: 503,
-              statusText: 'Service Unavailable',
-              headers: new Headers({
-                'Content-Type': 'text/html; charset=utf-8',
-              }),
+            if (fallbackResponse) {
+              return fallbackResponse;
+            }
+            // 如果首页也没有缓存，尝试查找任何已缓存的 HTML 页面
+            return caches.open(CACHE_NAME).then((cache) => {
+              return cache.keys().then((keys) => {
+                // 查找任何导航请求（HTML 页面）
+                for (const key of keys) {
+                  if (key.mode === 'navigate' || key.url.endsWith('/') || key.url.match(/\.html?$/i)) {
+                    return cache.match(key);
+                  }
+                }
+                return null;
+              });
+            }).then((anyPage) => {
+              // 如果找到了任何页面，返回它
+              if (anyPage) {
+                alert('no page found, try to back to availiable page');
+                return anyPage;
+              }
+              // 如果完全没有缓存，让请求失败，由浏览器显示默认错误页面
+              // 而不是显示 "Offline" 文本
+              return fetch(request);
             });
           });
         }
-        // 其他请求失败，返回错误响应
-        return new Response('Offline', {
-          status: 503,
-          statusText: 'Service Unavailable',
-          headers: new Headers({
-            'Content-Type': 'text/plain',
-          }),
-        });
+        // 对于其他请求（API、静态资源等），如果没有缓存，让请求失败
+        // 不返回错误响应，让浏览器或应用处理
+        return fetch(request);
       });
     })
   );
