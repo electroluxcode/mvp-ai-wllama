@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3098",
+    "dev": "next dev --port 3090",
     "build": "next build",
     "start": "next dev"
   },
@@ -20,11 +20,11 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "latest",
     "@types/node": "^22",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "tailwindcss": "^4",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5"
   }
 }
