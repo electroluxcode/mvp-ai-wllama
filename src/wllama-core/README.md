@@ -8,7 +8,7 @@
 - 🔧 **类型安全** - 完整的 TypeScript 类型定义
 - 💾 **持久化存储** - 自动保存推理参数到 localStorage
 - 🎨 **简洁 API** - 易于使用的接口设计
-- 💿 **模型缓存** - 基于 OPFS 的模型文件缓存系统，支持从 URL 下载和本地文件导入
+- 💿 **模型缓存** - 基于 IndexedDB 的模型文件缓存系统，支持从 URL 下载和本地文件导入
 - ⚡ **多线程支持** - 自动检测并使用多线程模式（需要正确的 HTTP 响应头配置）
 
 ## 安装
@@ -422,7 +422,7 @@ DebugLogger.error('错误信息');
 
 ### CacheManager
 
-模型缓存管理器，基于 OPFS (Origin Private File System) 实现。
+模型缓存管理器，基于 IndexedDB 实现，具有广泛的浏览器兼容性。
 
 ```typescript
 import { cacheManager, CacheEntry } from './wllama-core';
@@ -524,10 +524,11 @@ export const config = {
 
 ### 缓存系统要求
 
-缓存系统基于 OPFS (Origin Private File System)，需要：
+缓存系统基于 IndexedDB，具有广泛的浏览器兼容性：
 
-- 安全上下文（HTTPS 或 localhost）
-- 现代浏览器支持（Chrome、Firefox、Edge 等）
+- 支持所有现代浏览器（Chrome、Firefox、Edge、Safari 等）
+- 支持低版本浏览器（Chrome 24+, Firefox 16+, Safari 10+）
+- 无需特殊配置，开箱即用
 
 ## 完整示例
 
