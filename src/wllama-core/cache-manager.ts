@@ -246,15 +246,47 @@ export class CacheManager {
    */
   async delete(nameOrURL: string): Promise<void> {
     const cacheDir = await getCacheDir();
-    const fileName = await this.getNameFromURL(nameOrURL);
-    const metadataFileName = await urlToFileName(nameOrURL, PREFIX_METADATA);
+    
+    let fileName: string;
+    let metadataFileName: string;
+    
+    // Check if nameOrURL looks like a URL (starts with http:// or https://)
+    const isURL = nameOrURL.startsWith('http://') || nameOrURL.startsWith('https://') || nameOrURL.startsWith('/');
+    
+    if (isURL) {
+      // Convert URL to filename
+      fileName = await this.getNameFromURL(nameOrURL);
+      metadataFileName = await urlToFileName(nameOrURL, PREFIX_METADATA);
+    } else {
+      // It's already a filename, use it directly
+      fileName = nameOrURL;
+      
+      // Find the corresponding metadata file by looking up the entry
+      // The metadata filename is generated from the originalURL
+      try {
+        const entries = await this.list();
+        const entry = entries.find(e => e.name === nameOrURL);
+        if (entry && entry.metadata.originalURL) {
+          // Use the original URL to generate the correct metadata filename
+          metadataFileName = await urlToFileName(entry.metadata.originalURL, PREFIX_METADATA);
+        } else {
+          // Fallback: try the simple pattern PREFIX_METADATA + fileName
+          metadataFileName = `${PREFIX_METADATA}${nameOrURL}`;
+        }
+      } catch {
+        // Fallback: try the simple pattern PREFIX_METADATA + fileName
+        metadataFileName = `${PREFIX_METADATA}${nameOrURL}`;
+      }
+    }
 
+    // Delete the file
     try {
       await cacheDir.removeEntry(fileName);
     } catch {
       // File might not exist
     }
 
+    // Delete the metadata file
     try {
       await cacheDir.removeEntry(metadataFileName);
     } catch {
