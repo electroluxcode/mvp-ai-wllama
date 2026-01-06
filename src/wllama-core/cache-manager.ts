@@ -1,15 +1,16 @@
 /**
- * Cache Manager for model files using OPFS (Origin Private File System)
- * This implementation is simplified and doesn't depend on React
+ * Cache Manager for model files using IndexedDB
+ * This implementation uses IndexedDB for better browser compatibility
+ * Supports all modern browsers including older Chrome versions
  */
 
-const PREFIX_METADATA = '__metadata__';
-export const POLYFILL_ETAG = 'polyfill_for_older_version';
+const DB_NAME = 'wllama-cache';
+const DB_VERSION = 1;
+const STORE_FILES = 'files';
 
 export interface CacheEntryMetadata {
-  etag: string;
-  originalSize: number;
   originalURL: string;
+  [key: string]: any; // 允许扩展其他字段
 }
 
 export interface CacheEntry {
@@ -25,9 +26,22 @@ export interface DownloadOptions {
 }
 
 /**
+ * Cached file object stored in IndexedDB
+ * This structure is extensible - you can add more fields as needed
+ */
+export interface CachedFile {
+  blob: Blob;
+  originalURL: string;
+  createdAt?: number; // 创建时间戳
+  etag?: string; // HTTP etag
+  contentType?: string; // 内容类型
+  [key: string]: any; // 允许扩展其他字段
+}
+
+/**
  * Convert URL to file name using SHA-1 hash
  */
-async function urlToFileName(url: string, prefix: string): Promise<string> {
+async function urlToFileName(url: string): Promise<string> {
   const hashBuffer = await crypto.subtle.digest(
     'SHA-1',
     new TextEncoder().encode(url)
@@ -36,19 +50,55 @@ async function urlToFileName(url: string, prefix: string): Promise<string> {
   const hashHex = hashArray
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
-  return `${prefix}${hashHex}_${url.split('/').pop()}`;
+  return `${hashHex}_${url.split('/').pop()}`;
 }
 
 /**
- * Get cache directory handle
+ * Get IndexedDB database instance
  */
-async function getCacheDir(): Promise<FileSystemDirectoryHandle> {
-  if (typeof navigator === 'undefined' || !navigator.storage || !navigator.storage.getDirectory) {
-    throw new Error('OPFS is not available. This requires a secure context (HTTPS or localhost).');
-  }
-  const opfsRoot = await navigator.storage.getDirectory();
-  const cacheDir = await opfsRoot.getDirectoryHandle('cache', { create: true });
-  return cacheDir;
+function getDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB is not available'));
+      return;
+    }
+
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => {
+      reject(new Error(`Failed to open IndexedDB: ${request.error?.message}`));
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      // Verify object store exists
+      if (!db.objectStoreNames.contains(STORE_FILES)) {
+        // If store doesn't exist, reopen with higher version to trigger upgrade
+        db.close();
+        const upgradeRequest = indexedDB.open(DB_NAME, DB_VERSION + 1);
+        upgradeRequest.onerror = () => reject(new Error(`Failed to upgrade IndexedDB: ${upgradeRequest.error?.message}`));
+        upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
+        upgradeRequest.onupgradeneeded = (event) => {
+          const upgradeDb = (event.target as IDBOpenDBRequest).result;
+          if (upgradeDb.objectStoreNames.contains(STORE_FILES)) {
+            upgradeDb.deleteObjectStore(STORE_FILES);
+          }
+          upgradeDb.createObjectStore(STORE_FILES);
+        };
+        return;
+      }
+      resolve(db);
+    };
+
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      
+      // Create object store if it doesn't exist
+      if (!db.objectStoreNames.contains(STORE_FILES)) {
+        db.createObjectStore(STORE_FILES);
+      }
+    };
+  });
 }
 
 /**
@@ -56,18 +106,24 @@ async function getCacheDir(): Promise<FileSystemDirectoryHandle> {
  */
 export class CacheManager {
   /**
+   * Check if IndexedDB is available
+   */
+  isAvailable(): boolean {
+    return typeof indexedDB !== 'undefined';
+  }
+
+  /**
    * Convert a given URL into file name in cache
    */
   async getNameFromURL(url: string): Promise<string> {
-    return await urlToFileName(url, '');
+    return await urlToFileName(url);
   }
 
   /**
    * Download file from URL and save to cache
    */
   async download(url: string, options: DownloadOptions = {}): Promise<void> {
-    const metadataFileName = await urlToFileName(url, PREFIX_METADATA);
-    const filename = await urlToFileName(url, '');
+    const filename = await urlToFileName(url);
 
     const response = await fetch(url, {
       headers: options.headers,
@@ -78,68 +134,105 @@ export class CacheManager {
       throw new Error(`Failed to fetch: ${response.statusText}`);
     }
 
-    const contentLength = response.headers.get('content-length');
-    const total = contentLength ? parseInt(contentLength, 10) : 0;
-    const etag = response.headers.get('etag') || '';
-
     if (!response.body) {
       throw new Error('Response body is null');
     }
 
+    // Read the entire response into a Blob
     const reader = response.body.getReader();
-    const cacheDir = await getCacheDir();
-
-    // Write metadata first
-    const metadata: CacheEntryMetadata = {
-      etag: etag || POLYFILL_ETAG,
-      originalSize: total,
-      originalURL: url,
-    };
-    const metadataHandle = await cacheDir.getFileHandle(metadataFileName, { create: true });
-    const metadataWritable = await metadataHandle.createWritable();
-    await metadataWritable.write(new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    await metadataWritable.close();
-
-    // Write file content
-    const fileHandle = await cacheDir.getFileHandle(filename, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.truncate(0);
-
+    const chunks: Uint8Array[] = [];
     let loaded = 0;
+    const contentLength = response.headers.get('content-length');
+    const total = contentLength ? parseInt(contentLength, 10) : 0;
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      await writable.write(value);
+      chunks.push(value);
       loaded += value.length;
       if (options.progressCallback && total > 0) {
         options.progressCallback({ loaded, total });
       }
     }
 
-    await writable.close();
+    const blob = new Blob(chunks as BlobPart[]);
+    const db = await getDB();
+
+    // Store file as an extensible object with all metadata
+    const cachedFile: CachedFile = {
+      blob,
+      originalURL: url,
+      createdAt: Date.now(),
+      etag: response.headers.get('etag') || undefined,
+      contentType: response.headers.get('content-type') || undefined,
+    };
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readwrite');
+      
+      transaction.onerror = () => {
+        reject(new Error(`Transaction failed: ${transaction.error?.message}`));
+      };
+
+      transaction.oncomplete = () => {
+        resolve();
+      };
+
+      const fileStore = transaction.objectStore(STORE_FILES);
+      const fileRequest = fileStore.put(cachedFile, filename);
+      fileRequest.onerror = () => reject(new Error(`Failed to store file: ${fileRequest.error?.message}`));
+    });
   }
 
   /**
    * Open a file in cache for reading
    */
   async open(nameOrURL: string): Promise<File | null> {
-    const cacheDir = await getCacheDir();
+    const db = await getDB();
     let fileName = nameOrURL;
 
     // Try direct name first
     try {
-      const fileHandle = await cacheDir.getFileHandle(fileName);
-      return await fileHandle.getFile();
+      const file = await this.getFileFromDB(db, fileName);
+      if (file) return file;
     } catch {
       // Try converting URL to filename
       try {
-        fileName = await urlToFileName(nameOrURL, '');
-        const fileHandle = await cacheDir.getFileHandle(fileName);
-        return await fileHandle.getFile();
+        fileName = await urlToFileName(nameOrURL);
+        const file = await this.getFileFromDB(db, fileName);
+        if (file) return file;
       } catch {
         return null;
       }
     }
+
+    return null;
+  }
+
+  /**
+   * Get file from IndexedDB
+   */
+  private getFileFromDB(db: IDBDatabase, fileName: string): Promise<File | null> {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readonly');
+      const store = transaction.objectStore(STORE_FILES);
+      const request = store.get(fileName);
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        const cachedFile = request.result as CachedFile | undefined;
+        if (cachedFile && cachedFile.blob) {
+          // Convert Blob to File
+          const file = new File([cachedFile.blob], fileName, { type: 'application/octet-stream' });
+          resolve(file);
+        } else {
+          resolve(null);
+        }
+      };
+    });
   }
 
   /**
@@ -158,80 +251,140 @@ export class CacheManager {
    * Get metadata of a cached file
    */
   async getMetadata(name: string): Promise<CacheEntryMetadata | null> {
-    const cacheDir = await getCacheDir();
-    
-    // Try to get metadata file
-    let metadataFileName: string;
+    const db = await getDB();
+    let fileName = name;
+
+    // Try converting URL to filename if needed
     try {
-      metadataFileName = await urlToFileName(name, PREFIX_METADATA);
+      if (name.startsWith('http://') || name.startsWith('https://')) {
+        fileName = await urlToFileName(name);
+      }
     } catch {
-      // If name is already a filename, try to find corresponding metadata
-      metadataFileName = `${PREFIX_METADATA}${name}`;
+      // Ignore
     }
-    
+
     try {
-      const fileHandle = await cacheDir.getFileHandle(metadataFileName);
-      const file = await fileHandle.getFile();
-      const text = await file.text();
-      return JSON.parse(text) as CacheEntryMetadata;
+      const cachedFile = await this.getCachedFileFromDB(db, fileName);
+      if (cachedFile) {
+        // Return all metadata fields, excluding blob
+        const metadata: CacheEntryMetadata = {
+          originalURL: cachedFile.originalURL || name,
+        };
+        
+        // Copy all other fields except blob
+        Object.keys(cachedFile).forEach(key => {
+          if (key !== 'blob' && key !== 'originalURL') {
+            metadata[key] = (cachedFile as any)[key];
+          }
+        });
+        
+        return metadata;
+      }
     } catch {
-      // Fallback: return polyfill metadata if file exists
+      // Fallback: return metadata with name as URL
       const cachedSize = await this.getSize(name);
       return cachedSize > 0
         ? {
-            etag: POLYFILL_ETAG,
-            originalSize: cachedSize,
             originalURL: name,
           }
         : null;
     }
+
+    return null;
+  }
+
+  /**
+   * Get cached file object from IndexedDB
+   */
+  private getCachedFileFromDB(db: IDBDatabase, fileName: string): Promise<CachedFile | null> {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readonly');
+      const store = transaction.objectStore(STORE_FILES);
+      const request = store.get(fileName);
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        const cachedFile = request.result as CachedFile | undefined;
+        resolve(cachedFile || null);
+      };
+    });
   }
 
   /**
    * List all files currently in cache
    */
   async list(): Promise<CacheEntry[]> {
-    const cacheDir = await getCacheDir();
+    const db = await getDB();
     const result: CacheEntry[] = [];
-    const metadataMap: Record<string, CacheEntryMetadata> = {};
 
-    // First pass: collect metadata
-    // @ts-ignore - entries() exists but TypeScript types may not include it
-    for await (const [name, handler] of cacheDir.entries()) {
-      if (handler.kind === 'file' && name.startsWith(PREFIX_METADATA)) {
-        try {
-          const file = await (handler as FileSystemFileHandle).getFile();
-          const text = await file.text();
-          const meta = JSON.parse(text) as CacheEntryMetadata;
-          metadataMap[name.replace(PREFIX_METADATA, '')] = meta;
-        } catch {
-          // Skip corrupted metadata
+    // Get all files
+    const allFiles = await this.getAllFiles(db);
+    for (const [fileName, cachedFile] of Object.entries(allFiles)) {
+      // Build metadata object from cached file, excluding blob
+      const metadata: CacheEntryMetadata = {
+        originalURL: cachedFile.originalURL || fileName,
+      };
+      
+      // Copy all other fields except blob
+      Object.keys(cachedFile).forEach(key => {
+        if (key !== 'blob' && key !== 'originalURL') {
+          metadata[key] = (cachedFile as any)[key];
         }
-      }
-    }
-
-    // Second pass: collect files
-    // @ts-ignore - entries() exists but TypeScript types may not include it
-    for await (const [name, handler] of cacheDir.entries()) {
-      if (handler.kind === 'file' && !name.startsWith(PREFIX_METADATA)) {
-        try {
-          const file = await (handler as FileSystemFileHandle).getFile();
-          result.push({
-            name,
-            size: file.size,
-            metadata: metadataMap[name] || {
-              originalSize: file.size,
-              originalURL: '',
-              etag: POLYFILL_ETAG,
-            },
-          });
-        } catch {
-          // Skip files that can't be read
-        }
-      }
+      });
+      
+      result.push({
+        name: fileName,
+        size: cachedFile.blob.size,
+        metadata,
+      });
     }
 
     return result;
+  }
+
+  /**
+   * Get all files from IndexedDB
+   */
+  private getAllFiles(db: IDBDatabase): Promise<Record<string, CachedFile>> {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readonly');
+      const store = transaction.objectStore(STORE_FILES);
+      
+      const keysRequest = store.getAllKeys();
+      const valuesRequest = store.getAll();
+
+      let keys: string[] = [];
+      let values: CachedFile[] = [];
+      let completed = 0;
+
+      const checkComplete = () => {
+        completed++;
+        if (completed === 2) {
+          const files: Record<string, CachedFile> = {};
+          keys.forEach((key, index) => {
+            if (values[index]) {
+              files[key] = values[index];
+            }
+          });
+          resolve(files);
+        }
+      };
+
+      keysRequest.onerror = () => reject(keysRequest.error);
+      keysRequest.onsuccess = () => {
+        keys = keysRequest.result as string[];
+        checkComplete();
+      };
+
+      valuesRequest.onerror = () => reject(valuesRequest.error);
+      valuesRequest.onsuccess = () => {
+        values = valuesRequest.result as CachedFile[];
+        checkComplete();
+      };
+    });
   }
 
   /**
@@ -245,10 +398,9 @@ export class CacheManager {
    * Delete a single file in cache
    */
   async delete(nameOrURL: string): Promise<void> {
-    const cacheDir = await getCacheDir();
+    const db = await getDB();
     
     let fileName: string;
-    let metadataFileName: string;
     
     // Check if nameOrURL looks like a URL (starts with http:// or https://)
     const isURL = nameOrURL.startsWith('http://') || nameOrURL.startsWith('https://') || nameOrURL.startsWith('/');
@@ -256,62 +408,54 @@ export class CacheManager {
     if (isURL) {
       // Convert URL to filename
       fileName = await this.getNameFromURL(nameOrURL);
-      metadataFileName = await urlToFileName(nameOrURL, PREFIX_METADATA);
     } else {
       // It's already a filename, use it directly
       fileName = nameOrURL;
+    }
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readwrite');
       
-      // Find the corresponding metadata file by looking up the entry
-      // The metadata filename is generated from the originalURL
-      try {
-        const entries = await this.list();
-        const entry = entries.find(e => e.name === nameOrURL);
-        if (entry && entry.metadata.originalURL) {
-          // Use the original URL to generate the correct metadata filename
-          metadataFileName = await urlToFileName(entry.metadata.originalURL, PREFIX_METADATA);
-        } else {
-          // Fallback: try the simple pattern PREFIX_METADATA + fileName
-          metadataFileName = `${PREFIX_METADATA}${nameOrURL}`;
-        }
-      } catch {
-        // Fallback: try the simple pattern PREFIX_METADATA + fileName
-        metadataFileName = `${PREFIX_METADATA}${nameOrURL}`;
-      }
-    }
+      transaction.onerror = () => {
+        reject(new Error(`Transaction failed: ${transaction.error?.message}`));
+      };
 
-    // Delete the file
-    try {
-      await cacheDir.removeEntry(fileName);
-    } catch {
-      // File might not exist
-    }
+      transaction.oncomplete = () => {
+        resolve();
+      };
 
-    // Delete the metadata file
-    try {
-      await cacheDir.removeEntry(metadataFileName);
-    } catch {
-      // Metadata might not exist
-    }
+      // Delete the file
+      const fileStore = transaction.objectStore(STORE_FILES);
+      fileStore.delete(fileName);
+    });
   }
 
   /**
    * Delete multiple files in cache
    */
   async deleteMany(predicate: (e: CacheEntry) => boolean): Promise<void> {
-    const cacheDir = await getCacheDir();
+    const db = await getDB();
     const list = await this.list();
     
-    for (const item of list) {
-      if (predicate(item)) {
-        try {
-          await cacheDir.removeEntry(item.name);
-          const metadataFileName = await urlToFileName(item.metadata.originalURL || item.name, PREFIX_METADATA);
-          await cacheDir.removeEntry(metadataFileName);
-        } catch {
-          // File might already be deleted
-        }
+    const deleteItems = list.filter(predicate).map(item => item.name);
+    
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readwrite');
+      
+      transaction.onerror = () => {
+        reject(new Error(`Transaction failed: ${transaction.error?.message}`));
+      };
+
+      transaction.oncomplete = () => {
+        resolve();
+      };
+
+      const fileStore = transaction.objectStore(STORE_FILES);
+
+      for (const fileName of deleteItems) {
+        fileStore.delete(fileName);
       }
-    }
+    });
   }
 
   /**
@@ -330,42 +474,38 @@ export class CacheManager {
     file: File | Blob,
     metadata?: CacheEntryMetadata
   ): Promise<void> {
-    const cacheDir = await getCacheDir();
-    const fileName = await urlToFileName(url, '');
-    const metadataFileName = await urlToFileName(url, PREFIX_METADATA);
+    const fileName = await urlToFileName(url);
+    const db = await getDB();
 
-    // Write metadata
-    const fileMetadata: CacheEntryMetadata = metadata || {
-      etag: '',
-      originalSize: file.size,
-      originalURL: url,
+    // Store file as an extensible object
+    const cachedFile: CachedFile = {
+      blob: file,
+      originalURL: metadata?.originalURL || url,
+      createdAt: Date.now(),
+      contentType: file instanceof File ? file.type : undefined,
+      // Copy any additional metadata fields
+      ...(metadata ? Object.fromEntries(
+        Object.entries(metadata).filter(([key]) => key !== 'originalURL')
+      ) : {}),
     };
-    const metadataHandle = await cacheDir.getFileHandle(metadataFileName, { create: true });
-    const metadataWritable = await metadataHandle.createWritable();
-    await metadataWritable.write(new Blob([JSON.stringify(fileMetadata)], { type: 'application/json' }));
-    await metadataWritable.close();
 
-    // Write file content
-    const fileHandle = await cacheDir.getFileHandle(fileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.truncate(0);
-    
-    if (file instanceof File) {
-      const stream = file.stream();
-      const reader = stream.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        await writable.write(value);
-      }
-    } else {
-      await writable.write(file);
-    }
-    
-    await writable.close();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_FILES], 'readwrite');
+      
+      transaction.onerror = () => {
+        reject(new Error(`Transaction failed: ${transaction.error?.message}`));
+      };
+
+      transaction.oncomplete = () => {
+        resolve();
+      };
+
+      const fileStore = transaction.objectStore(STORE_FILES);
+      const fileRequest = fileStore.put(cachedFile, fileName);
+      fileRequest.onerror = () => reject(new Error(`Failed to store file: ${fileRequest.error?.message}`));
+    });
   }
 }
 
 // Export singleton instance
 export const cacheManager = new CacheManager();
-

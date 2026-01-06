@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { cacheManager, CacheEntry, toHumanReadableSize } from '@/wllama-core';
 import { Button, Space, Popconfirm, message, Spin } from 'antd';
-import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 
 export default function CacheManager() {
   const [cacheEntries, setCacheEntries] = useState<CacheEntry[]>([]);
@@ -35,6 +35,38 @@ export default function CacheManager() {
       await loadCache();
     } catch (error) {
       message.error(`删除失败: ${(error as Error).message}`);
+    }
+  };
+
+  const handleExport = async (entry: CacheEntry) => {
+    try {
+      const file = await cacheManager.open(entry.name);
+      if (!file) {
+        message.error('文件不存在');
+        return;
+      }
+
+      // Create download link
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Use original filename if available, otherwise use cached filename
+      const filename = entry.metadata.originalURL 
+        ? entry.metadata.originalURL.split('/').pop() || entry.name
+        : entry.name;
+      
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up the object URL
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      
+      message.success('导出成功');
+    } catch (error) {
+      message.error(`导出失败: ${(error as Error).message}`);
     }
   };
 
@@ -223,18 +255,18 @@ export default function CacheManager() {
                           {toHumanReadableSize(entry.size)}
                         </div>
                       </div>
-                      
-                      {entry.metadata.originalSize > 0 && (
-                        <div className="flex-1">
-                          <div className="text-xs text-gray-500 mb-1">原始大小</div>
-                          <div className="text-sm font-medium">
-                            {toHumanReadableSize(entry.metadata.originalSize)}
-                          </div>
-                        </div>
-                      )}
                     </div>
                     
-                    <div className="pt-2 border-t border-gray-100">
+                    <div className="pt-2 border-t border-gray-100 flex items-center gap-2">
+                      <Button
+                        type="link"
+                        icon={<DownloadOutlined />}
+                        size="small"
+                        className="p-0"
+                        onClick={() => handleExport(entry)}
+                      >
+                        导出
+                      </Button>
                       <Popconfirm
                         title="确定删除这个缓存文件吗？"
                         onConfirm={() => handleDelete(entry)}
