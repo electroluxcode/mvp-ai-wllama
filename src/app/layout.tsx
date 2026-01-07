@@ -12,19 +12,13 @@ export default function RootLayout({
   useEffect(() => {
     // 动态添加 PWA 相关标签
     if (typeof document === 'undefined') return;
-    
-    // 如果域名包含 github，使用 GitHub Pages 路径
-    const isGitHub = window.location.hostname.includes('github');
-    const manifestPath = isGitHub ? '/mvp-ai-wllama/manifest.json' : '/manifest.json';
-    
-    // 添加或更新 manifest 链接
-    let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement;
-    if (!manifestLink) {
-      manifestLink = document.createElement('link');
-      manifestLink.rel = 'manifest';
-      document.head.appendChild(manifestLink);
+    // 添加 manifest 链接
+    if (!document.querySelector('link[rel="manifest"]')) {
+      const manifest = document.createElement('link');
+      manifest.rel = 'manifest';
+      manifest.href = '/manifest.json';
+      document.head.appendChild(manifest);
     }
-    manifestLink.href = manifestPath;
   }, []);
 
   return (
