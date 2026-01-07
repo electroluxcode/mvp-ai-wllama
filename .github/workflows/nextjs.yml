@@ -85,29 +85,6 @@ jobs:
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
       - name: Build with Next.js
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
-      - name: Update manifest.json for GitHub Pages
-        run: |
-          MANIFEST_PATH="./out/manifest.json"
-          
-          if [ -f "$MANIFEST_PATH" ]; then
-            node -e "
-              const fs = require('fs');
-              const manifest = JSON.parse(fs.readFileSync('$MANIFEST_PATH', 'utf8'));
-              
-              manifest.start_url = '/mvp-ai-wllama/';
-              manifest.icons = manifest.icons.map(icon => ({
-                ...icon,
-                src: '/mvp-ai-wllama' + icon.src
-              }));
-              
-              fs.writeFileSync('$MANIFEST_PATH', JSON.stringify(manifest, null, 2));
-              console.log('Updated manifest.json:');
-              console.log('  start_url:', manifest.start_url);
-              console.log('  icons:', manifest.icons.map(i => i.src).join(', '));
-            "
-          else
-            echo "Warning: manifest.json not found at $MANIFEST_PATH"
-          fi
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
