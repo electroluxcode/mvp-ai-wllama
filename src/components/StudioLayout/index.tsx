@@ -182,7 +182,7 @@ export default function StudioLayout({ children }: StudioLayoutProps) {
             {isMounted && (
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
                 <ServiceWorkerUninstall />
-                <ServiceWorkerManager />
+                <ServiceWorkerManager swPath="/sw.js" />
               </div>
             )}
           </div>

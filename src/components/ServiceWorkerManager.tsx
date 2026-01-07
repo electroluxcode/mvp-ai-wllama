@@ -13,7 +13,7 @@ const isPWA = (): boolean => {
          (window.navigator as any).standalone === true;
 };
 
-export default function ServiceWorkerManager({ swPath }: ServiceWorkerManagerProps) {
+export default function ServiceWorkerManager({ swPath = '/sw.js' }: ServiceWorkerManagerProps) {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
   const registeringRef = useRef(false);
   const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
@@ -22,13 +22,6 @@ export default function ServiceWorkerManager({ swPath }: ServiceWorkerManagerPro
     if (!('serviceWorker' in navigator)) return;
 
     let mounted = true;
-
-    // 根据域名自动确定 sw.js 路径
-    const getSwPath = () => {
-      if (swPath) return swPath;
-      const isGitHub = typeof window !== 'undefined' && window.location.hostname.includes('github');
-      return isGitHub ? '/mvp-ai-wllama/sw.js' : '/sw.js';
-    };
 
     const checkAndManageSW = async () => {
       if (!mounted) return;
@@ -72,8 +65,7 @@ export default function ServiceWorkerManager({ swPath }: ServiceWorkerManagerPro
 
       registeringRef.current = true;
       try {
-        const actualSwPath = getSwPath();
-        const reg = await navigator.serviceWorker.register(actualSwPath);
+        const reg = await navigator.serviceWorker.register(swPath);
         if (mounted) {
           registrationRef.current = reg;
           setRegistration(reg);
@@ -141,7 +133,7 @@ export default function ServiceWorkerManager({ swPath }: ServiceWorkerManagerPro
       standaloneMedia.removeEventListener('change', handleMediaChange);
       minimalUIMedia.removeEventListener('change', handleMediaChange);
     };
-  }, []); // 移除 swPath 依赖，使用内部函数动态获取
+  }, [swPath]); // 移除 registration 依赖，避免循环
 
   return null;
 }
