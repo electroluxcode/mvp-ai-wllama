@@ -5,6 +5,7 @@
  */
 
 import { WllamaCore, Message, WllamaCoreEvent, WLLAMA_CONFIG_PATHS, cacheManager, wllamaCoreFactory } from './index';
+import { GenerationUpdateEventData, GenerationEndEventData, ModelLoadedEventData, ErrorEventData } from './types';
 
 // 创建 WllamaCore 实例（使用默认配置）
 const wllamaCore = new WllamaCore({
@@ -12,21 +13,21 @@ const wllamaCore = new WllamaCore({
 });
 
 // 监听事件
-wllamaCore.on(WllamaCoreEvent.MODEL_LOADED, (data) => {
+wllamaCore.on(WllamaCoreEvent.MODEL_LOADED, (data: ModelLoadedEventData) => {
   console.log('模型已加载:', data);
 });
 
-wllamaCore.on(WllamaCoreEvent.GENERATION_UPDATE, (data) => {
+wllamaCore.on(WllamaCoreEvent.GENERATION_UPDATE, (data: GenerationUpdateEventData) => {
   // 多实例模式下，data 包含 instanceId
   console.log('生成中:', data.data, '实例ID:', data.instanceId);
 });
 
-wllamaCore.on(WllamaCoreEvent.GENERATION_END, (data) => {
+wllamaCore.on(WllamaCoreEvent.GENERATION_END, (data: GenerationEndEventData) => {
   // 多实例模式下，data 包含 instanceId
   console.log('生成完成:', data.data, '实例ID:', data.instanceId);
 });
 
-wllamaCore.on(WllamaCoreEvent.ERROR, (error) => {
+wllamaCore.on(WllamaCoreEvent.ERROR, (error: ErrorEventData) => {
   console.error('错误:', error);
 });
 
@@ -172,11 +173,11 @@ export async function multiInstanceExample() {
   const instance2 = wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'instance-2');
 
   // 监听不同实例的事件
-  instance1.on(WllamaCoreEvent.MODEL_LOADED, (data) => {
+  instance1.on(WllamaCoreEvent.MODEL_LOADED, (data: ModelLoadedEventData) => {
     console.log('实例1模型已加载:', data.instanceId);
   });
 
-  instance2.on(WllamaCoreEvent.MODEL_LOADED, (data) => {
+  instance2.on(WllamaCoreEvent.MODEL_LOADED, (data: ModelLoadedEventData) => {
     console.log('实例2模型已加载:', data.instanceId);
   });
 
@@ -222,7 +223,7 @@ export async function multiInstanceEventExample() {
   const instance2 = wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'chat-2');
 
   // 监听所有实例的事件，但通过 instanceId 区分
-  const handleGenerationUpdate = (data: { data: string; instanceId: string }) => {
+  const handleGenerationUpdate = (data: GenerationUpdateEventData) => {
     if (data.instanceId === 'chat-1') {
       console.log('聊天1更新:', data.data);
     } else if (data.instanceId === 'chat-2') {
