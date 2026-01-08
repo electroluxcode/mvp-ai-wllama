@@ -28,6 +28,7 @@ const ROUTES = {
   WLLAMA_LOAD_FROM_URL: '/wllama/load-from-url',
   WLLAMA_LOAD_FROM_CACHE: '/wllama/load-from-cache',
   WLLAMA_CACHE: '/wllama/manager-cache',
+  WLLAMA_MULTI_INSTANCE: '/wllama/multi-instance',
 } as const
 
 const menuItems: MenuProps['items'] = [
@@ -55,6 +56,11 @@ const menuItems: MenuProps['items'] = [
         key: ROUTES.WLLAMA_CACHE,
         icon: <FolderOutlined />,
         label: 'Manager Cache',
+      },
+      {
+        key: ROUTES.WLLAMA_MULTI_INSTANCE,
+        icon: <AppstoreOutlined />,
+        label: 'Multi Instance',
       },
     ],
   },
@@ -87,6 +93,7 @@ export default function StudioLayout({ children }: StudioLayoutProps) {
       [ROUTES.WLLAMA_LOAD_FROM_URL]: { selected: ROUTES.WLLAMA_LOAD_FROM_URL, parent: ROUTES.WLLAMA },
       [ROUTES.WLLAMA_LOAD_FROM_CACHE]: { selected: ROUTES.WLLAMA_LOAD_FROM_CACHE, parent: ROUTES.WLLAMA },
       [ROUTES.WLLAMA_CACHE]: { selected: ROUTES.WLLAMA_CACHE, parent: ROUTES.WLLAMA },
+      [ROUTES.WLLAMA_MULTI_INSTANCE]: { selected: ROUTES.WLLAMA_MULTI_INSTANCE, parent: ROUTES.WLLAMA },
     }
 
     // 精确匹配路径

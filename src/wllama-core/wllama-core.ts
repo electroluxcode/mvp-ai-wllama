@@ -21,6 +21,7 @@ export class WllamaCore {
     'multi-thread/wllama.wasm'?: string;
   };
   private logger: WllamaCoreOptions['logger'];
+  private instanceId: string;
   private isModelLoaded: boolean = false;
   private isGenerating: boolean = false;
   private stopSignal: boolean = false;
@@ -29,10 +30,12 @@ export class WllamaCore {
   private inferenceParams: InferenceParams;
   private eventListeners: Map<WllamaCoreEvent, Set<EventListener>> = new Map();
 
-  constructor(options: WllamaCoreOptions) {
+  constructor(options: WllamaCoreOptions, instanceId?: string) {
     const { paths, logger } = options;
     this.paths = paths;
     this.logger = logger || DebugLogger;
+    this.instanceId = instanceId || `wllama-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     // Ensure logger has all required methods
     const wllamaLogger = {
       debug: logger?.debug || DebugLogger.debug,
@@ -43,7 +46,9 @@ export class WllamaCore {
     this.wllama = new Wllama(paths, { logger: wllamaLogger });
     
     // Load inference params from storage or use defaults
-    this.inferenceParams = WllamaStorage.load('params', {
+    // 每个实例使用独立的存储键
+    const storageKey = `params-${this.instanceId}`;
+    this.inferenceParams = WllamaStorage.load(storageKey, {
       nThreads: -1,
       nContext: 4096,
       nBatch: 128,
@@ -69,6 +74,7 @@ export class WllamaCore {
   private emit(event: WllamaCoreEvent, data?: unknown) {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
+      // 事件数据已经包含 instanceId，直接传递
       listeners.forEach((listener) => listener(data));
     }
   }
@@ -88,7 +94,7 @@ export class WllamaCore {
       throw new Error('No files provided');
     }
 
-    this.emit(WllamaCoreEvent.MODEL_LOADING);
+    this.emit(WllamaCoreEvent.MODEL_LOADING, { instanceId: this.instanceId });
     
     try {
       const loadOptions = {
@@ -122,11 +128,12 @@ export class WllamaCore {
       this.emit(WllamaCoreEvent.MODEL_LOADED, {
         metadata: this.modelMetadata,
         runtimeInfo: this.runtimeInfo,
+        instanceId: this.instanceId,
       });
     } catch (error) {
       this.resetInstance();
       const errorMsg = (error as Error)?.message ?? 'Unknown error';
-      this.emit(WllamaCoreEvent.ERROR, errorMsg);
+      this.emit(WllamaCoreEvent.ERROR, { data: errorMsg, instanceId: this.instanceId });
       throw new Error(errorMsg);
     }
   }
@@ -149,7 +156,7 @@ export class WllamaCore {
       throw new Error('URL is required');
     }
 
-    this.emit(WllamaCoreEvent.MODEL_LOADING);
+    this.emit(WllamaCoreEvent.MODEL_LOADING, { instanceId: this.instanceId });
 
     const useCache = options?.useCache !== false; // Default to true
 
@@ -190,7 +197,7 @@ export class WllamaCore {
     } catch (error) {
       this.resetInstance();
       const errorMsg = (error as Error)?.message ?? 'Unknown error';
-      this.emit(WllamaCoreEvent.ERROR, errorMsg);
+      this.emit(WllamaCoreEvent.ERROR, { data: errorMsg, instanceId: this.instanceId });
       throw new Error(errorMsg);
     }
   }
@@ -209,10 +216,10 @@ export class WllamaCore {
       this.isModelLoaded = false;
       this.modelMetadata = null;
       this.runtimeInfo = null;
-      this.emit(WllamaCoreEvent.MODEL_UNLOADED);
+      this.emit(WllamaCoreEvent.MODEL_UNLOADED, { instanceId: this.instanceId });
     } catch (error) {
       const errorMsg = (error as Error)?.message ?? 'Unknown error';
-      this.emit(WllamaCoreEvent.ERROR, errorMsg);
+      this.emit(WllamaCoreEvent.ERROR, { data: errorMsg, instanceId: this.instanceId });
       throw new Error(errorMsg);
     }
   }
@@ -234,7 +241,7 @@ export class WllamaCore {
 
     this.isGenerating = true;
     this.stopSignal = false;
-    this.emit(WllamaCoreEvent.GENERATION_START);
+    this.emit(WllamaCoreEvent.GENERATION_START, { instanceId: this.instanceId });
 
     try {
       const completionOptions = {
@@ -249,7 +256,7 @@ export class WllamaCore {
           if (options?.onNewToken) {
             options.onNewToken(token, piece, currentText, opts);
           }
-          this.emit(WllamaCoreEvent.GENERATION_UPDATE, currentText);
+          this.emit(WllamaCoreEvent.GENERATION_UPDATE, { data: currentText, instanceId: this.instanceId });
           if (this.stopSignal) {
             opts.abortSignal();
           }
@@ -257,11 +264,11 @@ export class WllamaCore {
       };
 
       const result = await this.wllama.createCompletion(input, completionOptions);
-      this.emit(WllamaCoreEvent.GENERATION_END, result);
+      this.emit(WllamaCoreEvent.GENERATION_END, { data: result, instanceId: this.instanceId });
       return result;
     } catch (error) {
       const errorMsg = (error as Error)?.message ?? 'Unknown error';
-      this.emit(WllamaCoreEvent.ERROR, errorMsg);
+      this.emit(WllamaCoreEvent.ERROR, { data: errorMsg, instanceId: this.instanceId });
       throw new Error(errorMsg);
     } finally {
       this.isGenerating = false;
@@ -303,7 +310,9 @@ export class WllamaCore {
    */
   setInferenceParams(params: Partial<InferenceParams>): void {
     this.inferenceParams = { ...this.inferenceParams, ...params };
-    WllamaStorage.save('params', this.inferenceParams);
+    // 每个实例使用独立的存储键
+    const storageKey = `params-${this.instanceId}`;
+    WllamaStorage.save(storageKey, this.inferenceParams);
   }
 
   /**
@@ -339,6 +348,13 @@ export class WllamaCore {
    */
   getGenerating(): boolean {
     return this.isGenerating;
+  }
+
+  /**
+   * Get instance ID
+   */
+  getInstanceId(): string {
+    return this.instanceId;
   }
 
   /**

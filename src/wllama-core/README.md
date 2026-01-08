@@ -10,11 +10,12 @@
 - 🎨 **简洁 API** - 易于使用的接口设计
 - 💿 **模型缓存** - 基于 IndexedDB 的模型文件缓存系统，支持从 URL 下载和本地文件导入
 - ⚡ **多线程支持** - 自动检测并使用多线程模式（需要正确的 HTTP 响应头配置）
+- 🔀 **多实例支持** - 支持创建和管理多个独立的 WllamaCore 实例，每个实例可以加载不同的模型
 
 ## 安装
 
 ```typescript
-import { WllamaCore, WLLAMA_CONFIG_PATHS } from './wllama-core';
+import { WllamaCore, WLLAMA_CONFIG_PATHS, wllamaCoreFactory } from './wllama-core';
 ```
 
 ## 快速开始
@@ -76,7 +77,7 @@ function ChatComponent() {
     const result = await wllamaCoreRef.current.createChatCompletion(
       [...messages, userMsg],
       {
-        onNewToken(_token, _piece, text) {
+        onNewToken(_token, _piece, text, _opts) {
           setMessages(prev => {
             const updated = [...prev];
             updated[updated.length - 1].content = text;
@@ -91,7 +92,272 @@ function ChatComponent() {
 }
 ```
 
+## 多实例模式
+
+wllama-core 支持创建和管理多个独立的实例，每个实例可以加载不同的模型，独立进行推理。这对于需要同时运行多个模型或管理多个对话场景非常有用。
+
+### 快速开始
+
+#### 单实例模式（向后兼容）
+
+```typescript
+import { wllamaCoreFactory, WLLAMA_CONFIG_PATHS } from './wllama-core';
+
+// 获取或创建默认实例
+const defaultInstance = wllamaCoreFactory.getDefault({ paths: WLLAMA_CONFIG_PATHS });
+
+// 使用默认实例
+await defaultInstance.loadModelFromUrl('https://example.com/model.gguf');
+const result = await defaultInstance.createChatCompletion([...]);
+```
+
+#### 多实例模式
+
+```typescript
+import { wllamaCoreFactory, WLLAMA_CONFIG_PATHS, Message, WllamaCoreEvent } from './wllama-core';
+
+// 创建多个实例
+const instance1 = wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'chat-1');
+const instance2 = wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'chat-2');
+
+// 每个实例可以加载不同的模型
+await instance1.loadModelFromUrl('https://example.com/model1.gguf');
+await instance2.loadModelFromUrl('https://example.com/model2.gguf');
+
+// 独立进行推理
+const messages1: Message[] = [{ role: 'user', content: '你好' }];
+const messages2: Message[] = [{ role: 'user', content: 'Hello' }];
+
+const [result1, result2] = await Promise.all([
+  instance1.createChatCompletion(messages1),
+  instance2.createChatCompletion(messages2),
+]);
+```
+
+### 事件系统
+
+在多实例模式下，所有事件数据都包含 `instanceId` 字段，用于区分不同实例的事件：
+
+```typescript
+// 监听特定实例的事件
+instance1.on(WllamaCoreEvent.MODEL_LOADED, (data) => {
+  console.log('实例1模型已加载:', data.instanceId);
+  console.log('模型元数据:', data.metadata);
+});
+
+instance2.on(WllamaCoreEvent.GENERATION_UPDATE, (data) => {
+  console.log('实例2生成更新:', data.data);
+  console.log('实例ID:', data.instanceId);
+});
+
+// 或者监听所有实例的事件，通过 instanceId 区分
+const handleUpdate = (data: { data: string; instanceId: string }) => {
+  if (data.instanceId === 'chat-1') {
+    console.log('聊天1更新:', data.data);
+  } else if (data.instanceId === 'chat-2') {
+    console.log('聊天2更新:', data.data);
+  }
+};
+
+instance1.on(WllamaCoreEvent.GENERATION_UPDATE, handleUpdate);
+instance2.on(WllamaCoreEvent.GENERATION_UPDATE, handleUpdate);
+```
+
+### 实例管理
+
+```typescript
+// 获取指定实例
+const instance = wllamaCoreFactory.get('chat-1');
+if (instance) {
+  console.log('实例ID:', instance.getInstanceId());
+}
+
+// 获取所有实例
+const allInstances = wllamaCoreFactory.getAll();
+console.log(`当前有 ${allInstances.size} 个实例`);
+
+// 检查实例是否存在
+if (wllamaCoreFactory.exists('chat-1')) {
+  console.log('实例存在');
+}
+
+// 销毁指定实例（会自动卸载模型）
+await wllamaCoreFactory.destroy('chat-1');
+
+// 销毁所有实例
+await wllamaCoreFactory.destroyAll();
+```
+
+### 在 React 中使用多实例
+
+```typescript
+import { useEffect, useRef } from 'react';
+import { wllamaCoreFactory, WLLAMA_CONFIG_PATHS, WllamaCoreEvent } from './wllama-core';
+
+function MultiChatComponent() {
+  const instance1Ref = useRef(wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'chat-1'));
+  const instance2Ref = useRef(wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'chat-2'));
+
+  useEffect(() => {
+    const instance1 = instance1Ref.current;
+    const instance2 = instance2Ref.current;
+
+    // 监听事件
+    instance1.on(WllamaCoreEvent.GENERATION_UPDATE, (data) => {
+      console.log('聊天1:', data.data);
+    });
+
+    instance2.on(WllamaCoreEvent.GENERATION_UPDATE, (data) => {
+      console.log('聊天2:', data.data);
+    });
+
+    return () => {
+      // 清理
+      wllamaCoreFactory.destroy('chat-1');
+      wllamaCoreFactory.destroy('chat-2');
+    };
+  }, []);
+
+  // ...
+}
+```
+
+### 注意事项
+
+1. **实例ID唯一性**：每个实例必须使用唯一的 ID，如果尝试创建相同 ID 的实例会抛出错误
+2. **资源隔离**：每个实例的推理参数存储在独立的 localStorage 键中（格式：`params-{instanceId}`）
+3. **事件隔离**：每个实例的事件监听器是独立的，但事件数据包含 `instanceId` 用于区分
+4. **内存管理**：使用完毕后记得调用 `destroy()` 或 `destroyAll()` 释放资源
+5. **向后兼容**：原有的直接创建 `WllamaCore` 实例的方式仍然支持，但推荐使用工厂类管理实例
+
 ## API 文档
+
+### WllamaCoreFactory
+
+工厂类，用于创建和管理多个 WllamaCore 实例。
+
+#### 获取工厂实例
+
+```typescript
+import { wllamaCoreFactory } from './wllama-core';
+
+// wllamaCoreFactory 是单例实例，可以直接使用
+```
+
+#### 方法
+
+##### `create(options?: Partial<WllamaCoreOptions>, instanceId?: string): WllamaCore`
+
+创建新的 WllamaCore 实例。
+
+**参数：**
+- `options?`: WllamaCore 选项（可选）
+  - `paths?`: WASM 文件路径配置
+  - `logger?`: 日志记录器
+- `instanceId?`: 可选的实例 ID，如果不提供则自动生成
+
+**返回值：** `WllamaCore` 实例
+
+**示例：**
+```typescript
+// 自动生成实例 ID
+const instance1 = wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS });
+
+// 指定实例 ID
+const instance2 = wllamaCoreFactory.create({ paths: WLLAMA_CONFIG_PATHS }, 'my-instance');
+```
+
+##### `get(instanceId?: string): WllamaCore | null`
+
+获取指定 ID 的实例。
+
+**参数：**
+- `instanceId?`: 实例 ID，默认为 `'default'`
+
+**返回值：** WllamaCore 实例，如果不存在则返回 `null`
+
+**示例：**
+```typescript
+const instance = wllamaCoreFactory.get('my-instance');
+if (instance) {
+  console.log('找到实例:', instance.getInstanceId());
+}
+```
+
+##### `getDefault(options?: Partial<WllamaCoreOptions>): WllamaCore`
+
+获取或创建默认实例（向后兼容）。
+
+**参数：**
+- `options?`: WllamaCore 选项（可选）
+
+**返回值：** WllamaCore 实例
+
+**示例：**
+```typescript
+const defaultInstance = wllamaCoreFactory.getDefault({ paths: WLLAMA_CONFIG_PATHS });
+```
+
+##### `getAll(): Map<string, WllamaCore>`
+
+获取所有实例。
+
+**返回值：** 所有实例的 Map
+
+**示例：**
+```typescript
+const allInstances = wllamaCoreFactory.getAll();
+console.log(`当前有 ${allInstances.size} 个实例`);
+```
+
+##### `exists(instanceId: string): boolean`
+
+检查指定 ID 的实例是否存在。
+
+**参数：**
+- `instanceId`: 实例 ID
+
+**返回值：** 是否存在
+
+**示例：**
+```typescript
+if (wllamaCoreFactory.exists('my-instance')) {
+  console.log('实例存在');
+}
+```
+
+##### `destroy(instanceId: string): Promise<void>`
+
+销毁指定 ID 的实例（会自动卸载模型）。
+
+**参数：**
+- `instanceId`: 实例 ID
+
+**示例：**
+```typescript
+await wllamaCoreFactory.destroy('my-instance');
+```
+
+##### `destroyAll(): Promise<void>`
+
+销毁所有实例。
+
+**示例：**
+```typescript
+await wllamaCoreFactory.destroyAll();
+```
+
+##### `getInstanceCount(): number`
+
+获取实例数量。
+
+**返回值：** 实例数量
+
+**示例：**
+```typescript
+const count = wllamaCoreFactory.getInstanceCount();
+console.log(`当前有 ${count} 个实例`);
+```
 
 ### WllamaCore
 
@@ -187,6 +453,9 @@ await wllamaCore.loadModelFromUrl('https://example.com/model.gguf', {
     - `top_k?`: Top-K 采样
     - `top_p?`: Top-P 采样
   - `onNewToken?`: 新 token 回调
+    ```typescript
+    (token: number, piece: Uint8Array, currentText: string, opts: { abortSignal: () => void }) => void
+    ```
 
 ##### `createChatCompletion(messages: Message[], options?: CompletionOptions): Promise<string>`
 
@@ -207,8 +476,9 @@ const messages: Message[] = [
 const result = await wllamaCore.createChatCompletion(messages, {
   nPredict: 4096,
   sampling: { temp: 0.2 },
-  onNewToken(token, piece, currentText) {
+  onNewToken(token, piece, currentText, opts) {
     console.log('生成中:', currentText);
+    // opts.abortSignal() 可以用于停止生成
   },
 });
 ```
@@ -259,6 +529,18 @@ const result = await wllamaCore.createChatCompletion(messages, {
 ##### `getGenerating(): boolean`
 
 检查是否正在生成。
+
+##### `getInstanceId(): string`
+
+获取实例的唯一 ID。
+
+**返回值：** 实例 ID 字符串
+
+**示例：**
+```typescript
+const instanceId = wllamaCore.getInstanceId();
+console.log('实例ID:', instanceId);
+```
 
 ##### `getWllamaInstance(): Wllama`
 
@@ -364,11 +646,12 @@ interface CacheEntry {
 
 ```typescript
 interface CacheEntryMetadata {
-  etag: string;              // ETag 头（用于验证）
-  originalSize: number;      // 原始文件大小
-  originalURL: string;       // 原始 URL
+  originalURL: string;       // 原始 URL（必需）
+  [key: string]: any;        // 可选的扩展字段，如 etag、originalSize 等
 }
 ```
+
+**注意：** `originalURL` 是唯一必需的字段。其他字段（如 `etag`、`originalSize`、`createdAt` 等）都是可选的扩展字段，可以根据需要添加。
 
 ### DownloadOptions
 

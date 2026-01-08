@@ -63,3 +63,38 @@ export enum WllamaCoreEvent {
   ERROR = 'error',
 }
 
+/**
+ * 事件数据基础接口，所有事件数据都包含 instanceId
+ */
+export interface BaseEventData {
+  instanceId: string;
+}
+
+/**
+ * 模型加载事件数据
+ */
+export interface ModelLoadedEventData extends BaseEventData {
+  metadata: ModelMetadata;
+  runtimeInfo: RuntimeInfo;
+}
+
+/**
+ * 生成更新事件数据
+ */
+export interface GenerationUpdateEventData extends BaseEventData {
+  data: string;
+}
+
+/**
+ * 生成结束事件数据
+ */
+export interface GenerationEndEventData extends BaseEventData {
+  data: string;
+}
+
+/**
+ * 错误事件数据
+ */
+export interface ErrorEventData extends BaseEventData {
+  data: string;
+}
